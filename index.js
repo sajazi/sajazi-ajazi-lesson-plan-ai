@@ -3,124 +3,85 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.default = void 0;
-exports.get = get;
-exports.getDependencies = getDependencies;
-exports.isInternal = isInternal;
-exports.list = void 0;
-exports.minVersion = minVersion;
+Object.defineProperty(exports, "Hub", {
+  enumerable: true,
+  get: function () {
+    return _hub.default;
+  }
+});
+Object.defineProperty(exports, "NodePath", {
+  enumerable: true,
+  get: function () {
+    return _index.default;
+  }
+});
+Object.defineProperty(exports, "Scope", {
+  enumerable: true,
+  get: function () {
+    return _index2.default;
+  }
+});
+exports.visitors = exports.default = void 0;
+require("./path/context.js");
+var visitors = require("./visitors.js");
+exports.visitors = visitors;
 var _t = require("@babel/types");
-var _helpersGenerated = require("./helpers-generated.js");
+var cache = require("./cache.js");
+var _traverseNode = require("./traverse-node.js");
+var _index = require("./path/index.js");
+var _index2 = require("./scope/index.js");
+var _hub = require("./hub.js");
 const {
-  cloneNode,
-  identifier
+  VISITOR_KEYS,
+  removeProperties,
+  traverseFast
 } = _t;
-function deep(obj, path, value) {
-  try {
-    const parts = path.split(".");
-    let last = parts.shift();
-    while (parts.length > 0) {
-      obj = obj[last];
-      last = parts.shift();
+function traverse(parent, opts = {}, scope, state, parentPath, visitSelf) {
+  if (!parent) return;
+  if (!opts.noScope && !scope) {
+    if (parent.type !== "Program" && parent.type !== "File") {
+      throw new Error("You must pass a scope and parentPath unless traversing a Program/File. " + `Instead of that you tried to traverse a ${parent.type} node without ` + "passing scope and parentPath.");
     }
-    if (arguments.length > 2) {
-      obj[last] = value;
-    } else {
-      return obj[last];
-    }
-  } catch (e) {
-    e.message += ` (when accessing ${path})`;
-    throw e;
   }
+  if (!parentPath && visitSelf) {
+    throw new Error("visitSelf can only be used when providing a NodePath.");
+  }
+  if (!VISITOR_KEYS[parent.type]) {
+    return;
+  }
+  visitors.explode(opts);
+  (0, _traverseNode.traverseNode)(parent, opts, scope, state, parentPath, undefined, visitSelf);
 }
-function permuteHelperAST(ast, metadata, bindingName, localBindings, getDependency, adjustAst) {
-  const {
-    locals,
-    dependencies,
-    exportBindingAssignments,
-    exportName
-  } = metadata;
-  const bindings = new Set(localBindings || []);
-  if (bindingName) bindings.add(bindingName);
-  for (const [name, paths] of (Object.entries || (o => Object.keys(o).map(k => [k, o[k]])))(locals)) {
-    let newName = name;
-    if (bindingName && name === exportName) {
-      newName = bindingName;
-    } else {
-      while (bindings.has(newName)) newName = "_" + newName;
+var _default = exports.default = traverse;
+traverse.visitors = visitors;
+traverse.verify = visitors.verify;
+traverse.explode = visitors.explode;
+traverse.cheap = function (node, enter) {
+  traverseFast(node, enter);
+  return;
+};
+traverse.node = function (node, opts, scope, state, path, skipKeys) {
+  (0, _traverseNode.traverseNode)(node, opts, scope, state, path, skipKeys);
+};
+traverse.clearNode = function (node, opts) {
+  removeProperties(node, opts);
+};
+traverse.removeProperties = function (tree, opts) {
+  traverseFast(tree, traverse.clearNode, opts);
+  return tree;
+};
+traverse.hasType = function (tree, type, denylistTypes) {
+  if (denylistTypes != null && denylistTypes.includes(tree.type)) return false;
+  if (tree.type === type) return true;
+  return traverseFast(tree, function (node) {
+    if (denylistTypes != null && denylistTypes.includes(node.type)) {
+      return traverseFast.skip;
     }
-    if (newName !== name) {
-      for (const path of paths) {
-        deep(ast, path, identifier(newName));
-      }
+    if (node.type === type) {
+      return traverseFast.stop;
     }
-  }
-  for (const [name, paths] of (Object.entries || (o => Object.keys(o).map(k => [k, o[k]])))(dependencies)) {
-    const ref = typeof getDependency === "function" && getDependency(name) || identifier(name);
-    for (const path of paths) {
-      deep(ast, path, cloneNode(ref));
-    }
-  }
-  adjustAst == null || adjustAst(ast, exportName, map => {
-    exportBindingAssignments.forEach(p => deep(ast, p, map(deep(ast, p))));
   });
-}
-const helperData = Object.create(null);
-function loadHelper(name) {
-  if (!helperData[name]) {
-    const helper = _helpersGenerated.default[name];
-    if (!helper) {
-      throw Object.assign(new ReferenceError(`Unknown helper ${name}`), {
-        code: "BABEL_HELPER_UNKNOWN",
-        helper: name
-      });
-    }
-    helperData[name] = {
-      minVersion: helper.minVersion,
-      build(getDependency, bindingName, localBindings, adjustAst) {
-        const ast = helper.ast();
-        permuteHelperAST(ast, helper.metadata, bindingName, localBindings, getDependency, adjustAst);
-        return {
-          nodes: ast.body,
-          globals: helper.metadata.globals
-        };
-      },
-      getDependencies() {
-        return Object.keys(helper.metadata.dependencies);
-      }
-    };
-  }
-  return helperData[name];
-}
-function get(name, getDependency, bindingName, localBindings, adjustAst) {
-  {
-    if (typeof bindingName === "object") {
-      const id = bindingName;
-      if ((id == null ? void 0 : id.type) === "Identifier") {
-        bindingName = id.name;
-      } else {
-        bindingName = undefined;
-      }
-    }
-  }
-  return loadHelper(name).build(getDependency, bindingName, localBindings, adjustAst);
-}
-function minVersion(name) {
-  return loadHelper(name).minVersion;
-}
-function getDependencies(name) {
-  return loadHelper(name).getDependencies();
-}
-function isInternal(name) {
-  var _helpers$name;
-  return (_helpers$name = _helpersGenerated.default[name]) == null ? void 0 : _helpers$name.metadata.internal;
-}
-{
-  exports.ensure = name => {
-    loadHelper(name);
-  };
-}
-const list = exports.list = Object.keys(_helpersGenerated.default).map(name => name.replace(/^_/, ""));
-var _default = exports.default = get;
+};
+traverse.cache = cache;
 
 //# sourceMappingURL=index.js.map
